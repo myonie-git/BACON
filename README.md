@@ -40,6 +40,17 @@ See the [experiment guide](docs/experiments.md) for other programs and the [buil
 
 ## Citation and license
 
-Please cite the BACON paper using [CITATION.cff](CITATION.cff).
+```bibtex
+@ARTICLE{11396026,
+  author={Xing, Yicheng and Feng, Dahu and Li, Hongyi and Ji, Xinglong and Zhao, Rong},
+  journal={IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems},
+  title={BACON: A Body-Aware Framework for Parameterized Collision Detection Acceleration},
+  year={2026},
+  volume={},
+  number={},
+  pages={1-1},
+  keywords={Collision avoidance;Robots;Robot kinematics;Manipulators;Hardware;Trees (botanical);Real-time systems;Processor scheduling;Dynamic scheduling;Service robots;Motion Planning;Robotics Accelerator;Agile Development;Collision Detection},
+  doi={10.1109/TCAD.2026.3664290}}
+```
 
 Original BACON code: [MIT](LICENSE). Third-party code and robot assets retain their [own licenses](THIRD_PARTY_NOTICES.md).
