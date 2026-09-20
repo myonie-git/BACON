@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+message: "If you use this software in research, please cite the BACON paper."
+title: "BACON software framework"
+type: software
+license: MIT
+authors:
+  - family-names: Xing
+    given-names: Yicheng
+  - family-names: Feng
+    given-names: Dahu
+  - family-names: Li
+    given-names: Hongyi
+  - family-names: Ji
+    given-names: Xinglong
+  - family-names: Zhao
+    given-names: Rong
+preferred-citation:
+  type: article
+  title: "BACON: A Body-Aware Framework for Parameterized Collision Detection Acceleration"
+  authors:
+    - family-names: Xing
+      given-names: Yicheng
+    - family-names: Feng
+      given-names: Dahu
+    - family-names: Li
+      given-names: Hongyi
+    - family-names: Ji
+      given-names: Xinglong
+    - family-names: Zhao
+      given-names: Rong
+  journal: "IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems"
+  year: 2026
+  doi: "10.1109/TCAD.2026.3664290"

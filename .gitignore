@@ -1,0 +1,38 @@
+# Build products and downloaded dependencies
+/build*/
+/devel/
+/third_party/ompl/
+/third_party/ompl-setup-*/
+/compile_commands.json
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Generated experiment outputs, never robot/environment inputs
+/exp/
+/data/
+/data_bak/
+/logs/
+/outputs/
+/results/
+/scripts/*.csv
+/scripts/*.log
+/scripts/*.pdf
+/scripts/*.png
+/scripts/*.svg
+/scripts/perf.data*
+/pycode/*.csv
+/pycode/*.png
+/*.csv
+/*.log
+/*.pdf
+/*.png
+/*.svg
+/*_dynamic*.txt
+
+# Local tooling
+.vscode/
+.idea/
+.catkin_tools/
+.DS_Store
+*.swp

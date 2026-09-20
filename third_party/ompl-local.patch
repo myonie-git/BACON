@@ -1,0 +1,517 @@
+diff --git a/demos/CMakeLists.txt b/demos/CMakeLists.txt
+index 336d1167..3a16e6a1 100644
+--- a/demos/CMakeLists.txt
++++ b/demos/CMakeLists.txt
+@@ -19,6 +19,8 @@ if (OMPL_BUILD_DEMOS)
+     add_ompl_demo(demo_PinballPlanning PinballPlanning.cpp)
+     add_ompl_demo(demo_BouncingBallPlanning BouncingBallPlanning.cpp)    
+     add_ompl_demo(demo_RigidBodyPlanning RigidBodyPlanning.cpp)
++    add_ompl_demo(demo_pRRTPlanning pRRTPlanning.cpp)
++    add_ompl_demo(demo_pRRTJointSpacePlanning pRRTJointSpacePlanning.cpp)
+     add_ompl_demo(demo_RigidBodyPlanningWithIK RigidBodyPlanningWithIK.cpp)
+     add_ompl_demo(demo_RigidBodyPlanningWithControls RigidBodyPlanningWithControls.cpp)
+     add_ompl_demo(demo_RigidBodyPlanningWithIntegrationAndControls RigidBodyPlanningWithIntegrationAndControls.cpp)
+diff --git a/src/ompl/base/src/DiscreteMotionValidator.cpp b/src/ompl/base/src/DiscreteMotionValidator.cpp
+index 6e028d75..410c501e 100644
+--- a/src/ompl/base/src/DiscreteMotionValidator.cpp
++++ b/src/ompl/base/src/DiscreteMotionValidator.cpp
+@@ -99,8 +99,10 @@ bool ompl::base::DiscreteMotionValidator::checkMotion(const State *s1, const Sta
+         return false;
+     }
+ 
++
+     bool result = true;
+     int nd = stateSpace_->validSegmentCount(s1, s2);
++    // std::cout << "nd: " << nd << std::endl;
+ 
+     /* initialize the queue of test positions */
+     std::queue<std::pair<int, int>> pos;
+diff --git a/src/ompl/geometric/planners/rrt/src/pRRT.cpp b/src/ompl/geometric/planners/rrt/src/pRRT.cpp
+index a9ef7d2f..170da632 100644
+--- a/src/ompl/geometric/planners/rrt/src/pRRT.cpp
++++ b/src/ompl/geometric/planners/rrt/src/pRRT.cpp
+@@ -107,7 +107,8 @@ void ompl::geometric::pRRT::threadSolve(unsigned int tid, const base::PlannerTer
+     base::State *rstate = rmotion->state;
+     base::State *xstate = si_->allocState();
+ 
+-    while (sol->solution == nullptr && ptc == false)
++    // 始终运行到外部终止条件为止；即便找到解也不提前退出，便于固定采样次数/性能统计。
++    while (ptc == false)
+     {
+         /* sample random state (with goal biasing) */
+         if (goal_s && rng.uniform01() < goalBias_ && goal_s->canSample())
+@@ -141,25 +142,23 @@ void ompl::geometric::pRRT::threadSolve(unsigned int tid, const base::PlannerTer
+             nnLock_.unlock();
+ 
+             double dist = 0.0;
+-            bool solved = goal->isSatisfied(motion->state, &dist);
++            const bool solved = goal->isSatisfied(motion->state, &dist);
++            sol->lock.lock();
+             if (solved)
+             {
+-                sol->lock.lock();
+-                sol->approxdif = dist;
+-                sol->solution = motion;
+-                sol->lock.unlock();
+-                break;
+-            }
+-            if (dist < sol->approxdif)
+-            {
+-                sol->lock.lock();
+-                if (dist < sol->approxdif)
++                // 保留第一次或更优的解，但不提前退出线程。
++                if (sol->solution == nullptr || dist < sol->approxdif)
+                 {
+                     sol->approxdif = dist;
+-                    sol->approxsol = motion;
++                    sol->solution = motion;
+                 }
+-                sol->lock.unlock();
+             }
++            else if (dist < sol->approxdif)
++            {
++                sol->approxdif = dist;
++                sol->approxsol = motion;
++            }
++            sol->lock.unlock();
+         }
+     }
+ 
+diff --git a/demos/pRRTPlanning.cpp b/demos/pRRTPlanning.cpp
+new file mode 100644
+index 00000000..5ed2ae81
+--- /dev/null
++++ b/demos/pRRTPlanning.cpp
+@@ -0,0 +1,187 @@
++/*********************************************************************
++* Software License Agreement (BSD License)
++*
++*  Copyright (c) 2025, OMPL contributors
++*  All rights reserved.
++*
++*  Redistribution and use in source and binary forms, with or without
++*  modification, are permitted provided that the following conditions
++*  are met:
++*
++*   * Redistributions of source code must retain the above copyright
++*     notice, this list of conditions and the following disclaimer.
++*   * Redistributions in binary form must reproduce the above
++*     copyright notice, this list of conditions and the following
++*     disclaimer in the documentation and/or other materials provided
++*     with the distribution.
++*   * Neither the name of the copyright holder nor the names of its
++*     contributors may be used to endorse or promote products derived
++*     from this software without specific prior written permission.
++*
++*  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++*  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++*  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++*  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++*  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++*  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++*  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++*  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++*  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++*  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++*  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++*  POSSIBILITY OF SUCH DAMAGE.
++*********************************************************************/
++
++/*
++ * A minimal demo showing how to use the parallel RRT planner (pRRT).
++ *
++ * Build target name: demo_pRRTPlanning
++ * Typical build output path: <build>/demos/demo_pRRTPlanning
++ */
++
++#include <ompl/base/spaces/SE2StateSpace.h>
++#include <ompl/config.h>
++#include <ompl/geometric/SimpleSetup.h>
++#include <ompl/geometric/planners/rrt/pRRT.h>
++#include <ompl/util/RandomNumbers.h>
++
++#include <boost/program_options.hpp>
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <iostream>
++#include <thread>
++
++namespace ob = ompl::base;
++namespace og = ompl::geometric;
++namespace po = boost::program_options;
++
++static unsigned int defaultThreadCount()
++{
++    unsigned int hw = std::thread::hardware_concurrency();
++    if (hw == 0)
++        hw = 1;
++    return std::min(4u, hw);
++}
++
++int main(int argc, char **argv)
++{
++    unsigned int threads = defaultThreadCount();
++    double time = 1.0;
++    double range = 0.0;  // 0 => let OMPL auto-configure
++    double goalBias = 0.05;
++    double obstacleRadius = 0.20;  // 0 => disable obstacle
++    bool simplify = true;
++
++    po::options_description desc("demo_pRRTPlanning options");
++    desc.add_options()
++        ("help,h", "Show this help message")
++        ("threads,j", po::value<unsigned int>(&threads)->default_value(threads),
++         "Number of threads for pRRT (>=1). Note: pRRT advertises a 1..64 range.")
++        ("time,t", po::value<double>(&time)->default_value(time), "Planning time in seconds")
++        ("range,r", po::value<double>(&range)->default_value(range),
++         "Maximum extension length (0 => auto-configure)")
++        ("goal-bias", po::value<double>(&goalBias)->default_value(goalBias),
++         "Probability of sampling the goal (0..1)")
++        ("obstacle-radius", po::value<double>(&obstacleRadius)->default_value(obstacleRadius),
++         "Radius of a circular obstacle centered at (0,0) (0 => no obstacle)")
++        ("no-simplify", po::bool_switch()->default_value(false),
++         "Disable post-processing (solution path simplification)")
++        ("seed", po::value<std::uint_fast32_t>(),
++         "Global OMPL RNG seed (for repeatability)");
++
++    po::variables_map vm;
++    try
++    {
++        po::store(po::parse_command_line(argc, argv, desc), vm);
++        po::notify(vm);
++    }
++    catch (const std::exception &e)
++    {
++        std::cerr << "Error parsing arguments: " << e.what() << "\n\n" << desc << std::endl;
++        return 2;
++    }
++
++    if (vm.count("help") != 0u)
++    {
++        std::cout << desc << std::endl;
++        return 0;
++    }
++
++    if (vm.count("seed") != 0u)
++        ompl::RNG::setSeed(vm["seed"].as<std::uint_fast32_t>());
++
++    if (threads < 1)
++        threads = 1;
++    // Keep within the advertised parameter range for safety.
++    threads = std::min(threads, 64u);
++
++    simplify = !vm["no-simplify"].as<bool>();
++
++    std::cout << "OMPL version: " << OMPL_VERSION << std::endl;
++    std::cout << "Planner: pRRT (threads=" << threads << ", time=" << time << "s"
++              << ", range=" << range << ", goal_bias=" << goalBias << ")\n";
++
++    // State space: SE(2) with bounds on x,y.
++    auto space = std::make_shared<ob::SE2StateSpace>();
++    ob::RealVectorBounds bounds(2);
++    bounds.setLow(-1.0);
++    bounds.setHigh(1.0);
++    space->setBounds(bounds);
++
++    // Simple obstacle: invalid if inside a circle of given radius at the origin.
++    og::SimpleSetup ss(space);
++    ss.setStateValidityChecker([space, obstacleRadius](const ob::State *state) {
++        if (!space->satisfiesBounds(state))
++            return false;
++        if (obstacleRadius <= 0.0)
++            return true;
++        const auto *se2 = state->as<ob::SE2StateSpace::StateType>();
++        const double x = se2->getX();
++        const double y = se2->getY();
++        return (x * x + y * y) > (obstacleRadius * obstacleRadius);
++    });
++
++    // Deterministic start/goal (easy to understand + works well with a fixed seed).
++    ob::ScopedState<ob::SE2StateSpace> start(space);
++    start->setX(-0.9);
++    start->setY(-0.9);
++    start->setYaw(0.0);
++
++    ob::ScopedState<ob::SE2StateSpace> goal(space);
++    goal->setX(0.9);
++    goal->setY(0.9);
++    goal->setYaw(0.0);
++
++    ss.setStartAndGoalStates(start, goal);
++
++    // Use pRRT explicitly and set the requested parallelism.
++    auto planner = std::make_shared<og::pRRT>(ss.getSpaceInformation());
++    planner->setThreadCount(threads);
++    planner->setGoalBias(goalBias);
++    if (range > 0.0)
++        planner->setRange(range);
++    ss.setPlanner(planner);
++
++    ss.setup();
++    ss.print();
++
++    const ob::PlannerStatus solved = ss.solve(time);
++    if (solved)
++    {
++        std::cout << "Found solution" << (solved.asString() == std::string("Exact solution") ? "" : " (approx)")
++                  << ":\n";
++        if (simplify)
++            ss.simplifySolution();
++        ss.getSolutionPath().printAsMatrix(std::cout);
++        return 0;
++    }
++
++    std::cout << "No solution found" << std::endl;
++    return 1;
++}
++
++
++
++
+diff --git a/demos/pRRTJointSpacePlanning.cpp b/demos/pRRTJointSpacePlanning.cpp
+new file mode 100644
+index 00000000..0e6d9afb
+--- /dev/null
++++ b/demos/pRRTJointSpacePlanning.cpp
+@@ -0,0 +1,239 @@
++/*********************************************************************
++* Software License Agreement (BSD License)
++*
++*  Copyright (c) 2025, OMPL contributors
++*  All rights reserved.
++*
++*  Redistribution and use in source and binary forms, with or without
++*  modification, are permitted provided that the following conditions
++*  are met:
++*
++*   * Redistributions of source code must retain the above copyright
++*     notice, this list of conditions and the following disclaimer.
++*   * Redistributions in binary form must reproduce the above
++*     copyright notice, this list of conditions and the following
++*     disclaimer in the documentation and/or other materials provided
++*     with the distribution.
++*   * Neither the name of the copyright holder nor the names of its
++*     contributors may be used to endorse or promote products derived
++*     from this software without specific prior written permission.
++*
++*  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++*  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++*  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
++*  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
++*  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++*  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
++*  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++*  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++*  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++*  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
++*  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
++*  POSSIBILITY OF SUCH DAMAGE.
++*********************************************************************/
++
++/*
++ * A minimal demo showing how to use the parallel RRT planner (pRRT)
++ * for joint-space planning in an N-DoF configuration space.
++ *
++ * Build target name: demo_pRRTJointSpacePlanning
++ * Typical build output path: <build>/demos/demo_pRRTJointSpacePlanning
++ */
++
++#include <ompl/base/spaces/RealVectorStateSpace.h>
++#include <ompl/config.h>
++#include <ompl/geometric/SimpleSetup.h>
++#include <ompl/geometric/planners/rrt/pRRT.h>
++#include <ompl/util/RandomNumbers.h>
++
++#include <boost/program_options.hpp>
++
++#include <algorithm>
++#include <cstdint>
++#include <cstddef>
++#include <iostream>
++#include <string>
++#include <thread>
++#include <vector>
++
++namespace ob = ompl::base;
++namespace og = ompl::geometric;
++namespace po = boost::program_options;
++
++static unsigned int defaultThreadCount()
++{
++    unsigned int hw = std::thread::hardware_concurrency();
++    if (hw == 0)
++        hw = 1;
++    return std::min(4u, hw);
++}
++
++static void printVector(std::ostream &out, const std::vector<double> &v)
++{
++    out << "[";
++    for (std::size_t i = 0; i < v.size(); ++i)
++    {
++        out << v[i];
++        if (i + 1 < v.size())
++            out << ", ";
++    }
++    out << "]";
++}
++
++int main(int argc, char **argv)
++{
++    unsigned int threads = defaultThreadCount();
++    double time = 1.0;
++    double range = 0.0;  // 0 => let OMPL auto-configure
++    double goalBias = 0.05;
++    bool simplify = true;
++
++    unsigned int dof = 7;
++    // Teaching/demo bounds for sampling. These are not "true joint limits" unless you choose so.
++    double jointLow = -3.14159265358979323846;
++    double jointHigh = 3.14159265358979323846;
++    double goalTolerance = 1e-3;
++
++    std::vector<double> startVec;
++    std::vector<double> goalVec;
++
++    po::options_description desc("demo_pRRTJointSpacePlanning options");
++    desc.add_options()
++        ("help,h", "Show this help message")
++        ("threads,j", po::value<unsigned int>(&threads)->default_value(threads),
++         "Number of threads for pRRT (>=1). Note: pRRT advertises a 1..64 range.")
++        ("time,t", po::value<double>(&time)->default_value(time), "Planning time in seconds")
++        ("range,r", po::value<double>(&range)->default_value(range),
++         "Maximum extension length in joint space (0 => auto-configure)")
++        ("goal-bias", po::value<double>(&goalBias)->default_value(goalBias),
++         "Probability of sampling the goal (0..1)")
++        ("dof,n", po::value<unsigned int>(&dof)->default_value(dof),
++         "Number of joints / DoF (>=1)")
++        ("joint-low", po::value<double>(&jointLow)->default_value(jointLow),
++         "Lower bound used for sampling ALL joints (teaching/demo bound)")
++        ("joint-high", po::value<double>(&jointHigh)->default_value(jointHigh),
++         "Upper bound used for sampling ALL joints (teaching/demo bound)")
++        ("goal-tol", po::value<double>(&goalTolerance)->default_value(goalTolerance),
++         "Goal tolerance (radius) in joint space")
++        ("start", po::value<std::vector<double>>(&startVec)->multitoken(),
++         "Start joint angles, provide N numbers: --start q0 q1 ... q{N-1}")
++        ("goal", po::value<std::vector<double>>(&goalVec)->multitoken(),
++         "Goal joint angles, provide N numbers: --goal q0 q1 ... q{N-1}")
++        ("no-simplify", po::bool_switch()->default_value(false),
++         "Disable post-processing (solution path simplification)")
++        ("seed", po::value<std::uint_fast32_t>(),
++         "Global OMPL RNG seed (for repeatability)");
++
++    po::variables_map vm;
++    try
++    {
++        po::store(po::parse_command_line(argc, argv, desc), vm);
++        po::notify(vm);
++    }
++    catch (const std::exception &e)
++    {
++        std::cerr << "Error parsing arguments: " << e.what() << "\n\n" << desc << std::endl;
++        return 2;
++    }
++
++    if (vm.count("help") != 0u)
++    {
++        std::cout << desc << std::endl;
++        return 0;
++    }
++
++    if (vm.count("seed") != 0u)
++        ompl::RNG::setSeed(vm["seed"].as<std::uint_fast32_t>());
++
++    if (threads < 1)
++        threads = 1;
++    // Keep within the advertised parameter range for safety.
++    threads = std::min(threads, 64u);
++
++    simplify = !vm["no-simplify"].as<bool>();
++
++    if (dof < 1)
++        dof = 1;
++
++    if (!(jointHigh > jointLow))
++    {
++        std::cerr << "Invalid bounds: --joint-high must be > --joint-low" << std::endl;
++        return 2;
++    }
++
++    if (!startVec.empty() && startVec.size() != dof)
++    {
++        std::cerr << "Invalid --start: expected " << dof << " values, got " << startVec.size() << std::endl;
++        return 2;
++    }
++    if (!goalVec.empty() && goalVec.size() != dof)
++    {
++        std::cerr << "Invalid --goal: expected " << dof << " values, got " << goalVec.size() << std::endl;
++        return 2;
++    }
++
++    if (startVec.empty())
++        startVec.assign(dof, 0.0);
++    if (goalVec.empty())
++        goalVec.assign(dof, 0.5);
++
++    std::cout << "OMPL version: " << OMPL_VERSION << std::endl;
++    std::cout << "Planner: pRRT (threads=" << threads << ", time=" << time << "s"
++              << ", range=" << range << ", goal_bias=" << goalBias << ")\n";
++    std::cout << "Joint-space: RealVectorStateSpace(dof=" << dof << "), bounds=[" << jointLow << ", " << jointHigh
++              << "], goal_tol=" << goalTolerance << "\n";
++    std::cout << "Start: ";
++    printVector(std::cout, startVec);
++    std::cout << "\nGoal : ";
++    printVector(std::cout, goalVec);
++    std::cout << "\n";
++
++    // Configuration space: R^N with simple uniform bounds for all joints.
++    auto space = std::make_shared<ob::RealVectorStateSpace>(dof);
++    ob::RealVectorBounds bounds(dof);
++    for (unsigned int i = 0; i < dof; ++i)
++    {
++        bounds.setLow(i, jointLow);
++        bounds.setHigh(i, jointHigh);
++    }
++    space->setBounds(bounds);
++
++    og::SimpleSetup ss(space);
++    // No obstacles/collision checking for this teaching demo: only enforce sampling bounds.
++    ss.setStateValidityChecker([space](const ob::State *state) { return space->satisfiesBounds(state); });
++
++    ob::ScopedState<ob::RealVectorStateSpace> start(space);
++    ob::ScopedState<ob::RealVectorStateSpace> goal(space);
++    for (unsigned int i = 0; i < dof; ++i)
++    {
++        start[i] = startVec[i];
++        goal[i] = goalVec[i];
++    }
++    ss.setStartAndGoalStates(start, goal, goalTolerance);
++
++    auto planner = std::make_shared<og::pRRT>(ss.getSpaceInformation());
++    planner->setThreadCount(threads);
++    planner->setGoalBias(goalBias);
++    if (range > 0.0)
++        planner->setRange(range);
++    ss.setPlanner(planner);
++
++    ss.setup();
++    ss.print();
++
++    const ob::PlannerStatus solved = ss.solve(time);
++    if (solved)
++    {
++        std::cout << "Found solution" << (solved.asString() == std::string("Exact solution") ? "" : " (approx)")
++                  << ":\n";
++        if (simplify)
++            ss.simplifySolution();
++        ss.getSolutionPath().printAsMatrix(std::cout);
++        return 0;
++    }
++
++    std::cout << "No solution found" << std::endl;
++    return 1;
++}
++
++

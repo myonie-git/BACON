@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>kinova_description</name>
+  <version>0.1.0</version>
+  <description>The kinova_description description package</description>
+  <maintainer email="your_email@example.com">Your Name</maintainer>
+  <license>BSD</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>urdf</build_depend>
+  <exec_depend>urdf</exec_depend>
+  <export>
+  </export>
+</package>
