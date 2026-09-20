@@ -6,6 +6,12 @@ Source code for [BACON: A Body-Aware Framework for Parameterized Collision Detec
 
 Includes collision detection, MCTS grouping, and timing experiments for six robots: Fanuc, PRBT, Panda, Jaco-2, Jaco-3, and Go1. Hardware RTL is maintained separately.
 
+## Workflow
+
+[![BACON workflow](assets/bacon-workflow.png)](assets/bacon-workflow.png)
+
+*BACON workflow (Fig. 4 in the [paper](https://doi.org/10.1109/TCAD.2026.3664290)).*
+
 ## Quick start
 
 Requires C++17, CMake >= 3.16, and ROS Noetic with the dependencies in the [build guide](docs/build.md).
