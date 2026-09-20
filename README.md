@@ -1,5 +1,7 @@
 # BACON
 
+![BACON logo](assets/bacon-banner.png)
+
 Source code for [BACON: A Body-Aware Framework for Parameterized Collision Detection Acceleration](https://doi.org/10.1109/TCAD.2026.3664290), IEEE TCAD 2026.
 
 Includes collision detection, MCTS grouping, and timing experiments for six robots: Fanuc, PRBT, Panda, Jaco-2, Jaco-3, and Go1. Hardware RTL is maintained separately.
